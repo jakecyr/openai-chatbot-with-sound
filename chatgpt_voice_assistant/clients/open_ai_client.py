@@ -47,7 +47,7 @@ class OpenAIClient:
             f"Sending prompt to chat completion endpoint: {json.dumps(messages)}"
         )
 
-        completion: ChatCompletion = openai.chat.completions.create(
+        completion: ChatCompletion = self._client.chat.completions.create(
             messages=messages,
             model=model,
             max_tokens=max_tokens,
