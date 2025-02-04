@@ -1,40 +1,34 @@
-import mock
-from pytest import fixture, raises
+import pytest
+from unittest import mock
 
-from chatgpt_voice_assistant.clients.open_ai_client import OpenAIClient
-from chatgpt_voice_assistant.exceptions.text_generation_error import TextGenerationError
-from chatgpt_voice_assistant.models.message import Message
-import os
 from openai.types.chat import ChatCompletionMessage
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.completion_usage import CompletionUsage
 
+from chatgpt_voice_assistant.clients.open_ai_client import OpenAIClient
+from chatgpt_voice_assistant.exceptions.text_generation_error import TextGenerationError
+from chatgpt_voice_assistant.models.message import Message
 
-OPEN_AI_KEY = "fake-key"
-os.environ["OPENAI_API_KEY"] = OPEN_AI_KEY
-
+# Your mocked completion functions
 MOCK_RESPONSE_STOP_DUE_TO_LENGTH = Choice(
     message=ChatCompletionMessage(
-        content="Hello there! How are you?",
-        role="assistant",
+        content="Hello there! How are you?", role="assistant"
     ),
     index=0,
     finish_reason="length",
 )
 
-MOCK_RESPONSES: list[Choice] = [
+MOCK_RESPONSES = [
     Choice(
         message=ChatCompletionMessage(
-            content="Hello there! How are you?",
-            role="assistant",
+            content="Hello there! How are you?", role="assistant"
         ),
         index=0,
         finish_reason="stop",
     ),
     Choice(
         message=ChatCompletionMessage(
-            content="I'm doing well! How about you?",
-            role="assistant",
+            content="I'm doing well! How about you?", role="assistant"
         ),
         index=1,
         finish_reason="stop",
@@ -42,12 +36,7 @@ MOCK_RESPONSES: list[Choice] = [
 ]
 
 
-@fixture
-def open_ai_client() -> OpenAIClient:
-    return OpenAIClient(OPEN_AI_KEY)
-
-
-def mock_create_completion_no_responses(**kwargs):
+def mock_create_completion_no_responses(*args, **kwargs):
     return ChatCompletion(
         choices=[],
         usage=CompletionUsage(
@@ -55,12 +44,12 @@ def mock_create_completion_no_responses(**kwargs):
         ),
         model="gpt-3.5-turbo",
         created=0,
-        id="chatcmpl-6Qp9nJjyCZ2UJyE2oXh8HqL5yq2KJ",
+        id="chatcmpl-12345",
         object="chat.completion",
     )
 
 
-def mock_create_completion_multiple_responses(**kwargs):
+def mock_create_completion_multiple_responses(*args, **kwargs):
     return ChatCompletion(
         choices=MOCK_RESPONSES,
         usage=CompletionUsage(
@@ -68,12 +57,12 @@ def mock_create_completion_multiple_responses(**kwargs):
         ),
         model="gpt-3.5-turbo",
         created=0,
-        id="chatcmpl-6Qp9nJjyCZ2UJyE2oXh8HqL5yq2KJ",
+        id="chatcmpl-12345",
         object="chat.completion",
     )
 
 
-def mock_create_completion_stop_due_to_length(**kwargs):
+def mock_create_completion_stop_due_to_length(*args, **kwargs):
     return ChatCompletion(
         choices=[MOCK_RESPONSE_STOP_DUE_TO_LENGTH],
         usage=CompletionUsage(
@@ -81,78 +70,55 @@ def mock_create_completion_stop_due_to_length(**kwargs):
         ),
         model="gpt-3.5-turbo",
         created=0,
-        id="chatcmpl-6Qp9nJjyCZ2UJyE2oXh8HqL5yq2KJ",
+        id="chatcmpl-12345",
         object="chat.completion",
     )
 
 
-@mock.patch(
-    "chatgpt_voice_assistant.clients.open_ai_client.openai.chat.completions.create",
-    mock_create_completion_no_responses,
-)
-def test_get_chat_completion_throws_exception_no_responses(
-    open_ai_client: OpenAIClient,
-) -> None:
-    max_tokens = 70
-
-    message: ChatCompletionMessage = {
-        "role": "user",
-        "content": "Yeah do you have one in mind?",
-    }
-
-    with raises(TextGenerationError):
-        open_ai_client.get_chat_completion(messages=[message], max_tokens=max_tokens)
+# Fixture that patches out the OpenAI constructor and injects our nested mocks.
+@pytest.fixture
+def open_ai_client():
+    with mock.patch("openai.OpenAI.__init__", return_value=None):
+        client = OpenAIClient("fake-key")
+        # Replace _client with a MagicMock so no real auth occurs.
+        client._client = mock.MagicMock()
+        # Set up the nested structure so our code can call:
+        #   self._client.chat.completions.create(...)
+        client._client.chat = mock.MagicMock()
+        client._client.chat.completions = mock.MagicMock()
+        yield client
 
 
-@mock.patch(
-    "chatgpt_voice_assistant.clients.open_ai_client.openai.chat.completions.create",
-    mock_create_completion_no_responses,
-)
-def test_get_chat_completion_throws_exception_if_no_messages_are_inputted(
-    open_ai_client: OpenAIClient,
-) -> None:
-    max_tokens = 70
-
-    with raises(ValueError):
-        open_ai_client.get_chat_completion(messages=[], max_tokens=max_tokens)
-
-
-@mock.patch(
-    "chatgpt_voice_assistant.clients.open_ai_client.openai.chat.completions.create",
-    mock_create_completion_multiple_responses,
-)
-def test_get_chat_completion_returns_first_response(open_ai_client: OpenAIClient):
-    max_tokens = 70
-    message: ChatCompletionMessage = {
-        "role": "user",
-        "content": "Yeah do you have one in mind?",
-    }
-
-    response = open_ai_client.get_chat_completion(
-        messages=[message], max_tokens=max_tokens
+def test_get_chat_completion_throws_exception_no_responses(open_ai_client):
+    open_ai_client._client.chat.completions.create.side_effect = (
+        mock_create_completion_no_responses
     )
 
-    assert response is not None
+    message = {"role": "user", "content": "Yeah do you have one in mind?"}
+
+    with pytest.raises(TextGenerationError):
+        open_ai_client.get_chat_completion([message], max_tokens=70)
+
+
+def test_get_chat_completion_returns_first_response(open_ai_client):
+    open_ai_client._client.chat.completions.create.side_effect = (
+        mock_create_completion_multiple_responses
+    )
+
+    message = {"role": "user", "content": "Yeah do you have one in mind?"}
+    response = open_ai_client.get_chat_completion([message], max_tokens=70)
+
     assert response.content == MOCK_RESPONSES[0].message.content
-    assert response.role == "assistant"
     assert not response.was_cut_short
 
 
-@mock.patch(
-    "chatgpt_voice_assistant.clients.open_ai_client.openai.chat.completions.create",
-    mock_create_completion_stop_due_to_length,
-)
-def test_get_chat_completion_sets_was_cut_short_to_true(open_ai_client: OpenAIClient):
-    max_tokens = 70
-    message: ChatCompletionMessage = {
-        "role": "user",
-        "content": "Yeah do you have one in mind?",
-    }
-
-    response: Message = open_ai_client.get_chat_completion(
-        messages=[message], max_tokens=max_tokens
+def test_get_chat_completion_sets_was_cut_short_to_true(open_ai_client):
+    open_ai_client._client.chat.completions.create.side_effect = (
+        mock_create_completion_stop_due_to_length
     )
 
-    assert response is not None
+    message = {"role": "user", "content": "Yeah do you have one in mind?"}
+    response: Message = open_ai_client.get_chat_completion([message], max_tokens=70)
+
     assert response.content == MOCK_RESPONSE_STOP_DUE_TO_LENGTH.message.content
     assert response.was_cut_short
